@@ -1,0 +1,283 @@
+from pathlib import Path
+
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from sqlalchemy.orm import Session
+
+from .database import Base, engine, get_db
+from .models import BodyProfile, Clothing
+from .schemas import BodyProfileCreate, BodyProfileResponse
+
+
+# ============================================================
+# DATABASE
+# ============================================================
+
+Base.metadata.create_all(bind=engine)
+
+
+# ============================================================
+# FASTAPI
+# ============================================================
+
+app = FastAPI(
+    title="VirtualFit API",
+    description="Sistema de probador virtual de ropa",
+    version="1.0.0"
+)
+
+
+# ============================================================
+# CORS
+# ============================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ============================================================
+# FRONTEND
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+FRONTEND_DIR = BASE_DIR / "frontend"
+
+app.mount(
+    "/static",
+    StaticFiles(directory=FRONTEND_DIR),
+    name="static"
+)
+
+MODELS_DIR = BASE_DIR / "models"
+
+app.mount(
+    "/models",
+    StaticFiles(directory=MODELS_DIR),
+    name="models"
+)
+@app.get("/", include_in_schema=False)
+def home():
+    return FileResponse(
+        FRONTEND_DIR / "index.html"
+    )
+
+
+# ============================================================
+# ROOT
+# ============================================================
+
+@app.get("/api")
+def api_root():
+
+    return {
+        "project": "VirtualFit",
+        "status": "online",
+        "version": "1.0.0"
+    }
+
+
+# ============================================================
+# HEALTH
+# ============================================================
+
+@app.get("/api/health")
+def health():
+
+    return {
+        "status": "healthy"
+    }
+
+
+# ============================================================
+# BODY PROFILE
+# ============================================================
+
+@app.post(
+    "/api/body-profile",
+    response_model=BodyProfileResponse
+)
+def create_body_profile(
+    profile: BodyProfileCreate,
+    db: Session = Depends(get_db)
+):
+
+    new_profile = BodyProfile(
+        name=profile.name,
+        height=profile.height,
+        weight=profile.weight,
+        chest=profile.chest,
+        waist=profile.waist,
+        hip=profile.hip,
+        shoulders=profile.shoulders,
+        skin_tone=profile.skin_tone
+    )
+
+    db.add(new_profile)
+    db.commit()
+    db.refresh(new_profile)
+
+    return new_profile
+
+
+# ============================================================
+# GET BODY PROFILES
+# ============================================================
+
+@app.get("/api/body-profiles")
+def get_body_profiles(
+    db: Session = Depends(get_db)
+):
+
+    profiles = db.query(BodyProfile).all()
+
+    return profiles
+
+
+# ============================================================
+# GET ONE PROFILE
+# ============================================================
+
+@app.get("/api/body-profile/{profile_id}")
+def get_body_profile(
+    profile_id: int,
+    db: Session = Depends(get_db)
+):
+
+    profile = (
+        db.query(BodyProfile)
+        .filter(BodyProfile.id == profile_id)
+        .first()
+    )
+
+    if not profile:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Perfil no encontrado"
+        )
+
+    return profile
+
+
+# ============================================================
+# BMI
+# ============================================================
+
+@app.get("/api/body-profile/{profile_id}/bmi")
+def calculate_bmi(
+    profile_id: int,
+    db: Session = Depends(get_db)
+):
+
+    profile = (
+        db.query(BodyProfile)
+        .filter(BodyProfile.id == profile_id)
+        .first()
+    )
+
+    if not profile:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Perfil no encontrado"
+        )
+
+    height_meters = profile.height / 100
+
+    bmi = profile.weight / (
+        height_meters * height_meters
+    )
+
+    return {
+        "profile_id": profile.id,
+        "bmi": round(bmi, 2)
+    }
+
+
+# ============================================================
+# CLOTHING
+# ============================================================
+
+@app.get("/api/clothing")
+def get_clothing(
+    db: Session = Depends(get_db)
+):
+
+    clothing = db.query(Clothing).all()
+
+    return clothing
+
+
+# ============================================================
+# CREATE CLOTHING
+# ============================================================
+
+@app.post("/api/clothing")
+def create_clothing(
+    name: str,
+    category: str,
+    brand: str,
+    price: float,
+    color: str,
+    size: str,
+    model_path: str = "",
+    db: Session = Depends(get_db)
+):
+
+    clothing = Clothing(
+        name=name,
+        category=category,
+        brand=brand,
+        price=price,
+        color=color,
+        size=size,
+        model_path=model_path
+    )
+
+    db.add(clothing)
+    db.commit()
+    db.refresh(clothing)
+
+    return clothing
+
+
+# ============================================================
+# SIZE RECOMMENDATION
+# ============================================================
+
+@app.get("/api/recommend-size/{profile_id}")
+def recommend_size(
+    profile_id: int,
+    db: Session = Depends(get_db)
+):
+
+    profile = (
+        db.query(BodyProfile)
+        .filter(BodyProfile.id == profile_id)
+        .first()
+    )
+
+    if not profile:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Perfil no encontrado"
+        )
+
+    chest = profile.chest
+
+    if chest < 90:
+        size = "S"
+
+    elif chest < 100:
+        size = "M"
+
+    elif che
